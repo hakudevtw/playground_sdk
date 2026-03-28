@@ -2,8 +2,10 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8">
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<title>Document</title>
+		<title>playground-react</title>
+		<!-- UMD from @repo/core: run `bun run start` in packages/core (port 4010) -->
 		<script>
 		"use strict";
 
@@ -25,22 +27,7 @@
 		<script defer src="http://localhost:4010/index.global.js"></script>
 	</head>
 	<body>
-		<button type="button" data-track id="add-button">Add Button</button>
-
-		<script>
-		"use strict";
-
-		const addButton = document.getElementById("add-button");
-
-		let counter = 0;
-		addButton.addEventListener("click", () => {
-			const newButton = document.createElement("button");
-			newButton.type = "button";
-			newButton.dataset.track = "true";
-			newButton.id = `new-button-${counter++}`;
-			newButton.textContent = `Click me ${counter}`;
-			document.body.appendChild(newButton);
-		});
-		</script>
+		<div id="root"></div>
+		<script type="module" src="/src/main.tsx"></script>
 	</body>
 </html>

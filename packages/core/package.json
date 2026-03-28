@@ -4,12 +4,14 @@
   "private": true,
   "license": "MIT",
   "scripts": {
-    "dev": "tsup --watch",
-    "build": "tsup "
+    "dev": "tsup --watch & serve dist -l 4010",
+    "build": "tsup",
+    "start": "serve dist -l 4010"
   },
   "devDependencies": {
     "@repo/typescript-config": "*",
     "esbuild-plugin-umd-wrapper": "^3.0.0",
+    "serve": "^14.2.4",
     "tsup": "^8.5.1"
   }
 }

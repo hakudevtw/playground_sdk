@@ -111,3 +111,4 @@ To keep the CPU overhead minimal:
 ## Questions to Confirm Later
 
 1. Why I see many sdks instead of simple stub function, it also appends the script tag? instead of needing user to manually append the script tag? Maybe to control when to load?
+2. Do we usually add data-track? Won't that also need user to add data-track to the elements? That don't seems auto...
