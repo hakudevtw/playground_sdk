@@ -76,6 +76,38 @@ Standard Map vs. WeakMap: A standard Map holds "Strong" references. A WeakMap ho
 
 Garbage Collection (GC): While we cannot manually trigger GC, we write "GC-friendly" code. In a large-scale SDK, "cleaning up after yourself" should be automatic, not manual.
 
+### Phase 2.2: Automated Tracking & DOM Observation
+
+#### 🚀 The "Set and Forget" Integration
+
+At enterprise scale, requiring developers to manually tag every element in code is prone to human error and high maintenance. We implement an **AutoTracker** to decouple tracking logic from the application's business logic.
+
+- **Initial Scan**: Upon initialization, the SDK performs a one-time traversal of the existing DOM (`document.body`) to register all elements currently matching the `[data-track]` selector.
+- **Dynamic Observation**: We utilize `MutationObserver` to watch for `childList` changes. This allows the SDK to detect and track new elements injected by frameworks (React, Vue) or vanilla JS without requiring manual re-initialization.
+
+#### ⚡ Performance: Microtasks & Layout Stability
+
+A key requirement for a Rakuten-scale SDK is **Zero-Impact** on the host page's performance.
+
+- **Microtask Execution**: Unlike the deprecated `DOMNodeInserted` (which was synchronous and fired for every single node), `MutationObserver` is **asynchronous and microtask-based**.
+- **Batching**: The browser batches multiple DOM changes into a single callback that executes after the current execution task finishes. This prevents the "Jank" associated with frequent UI updates.
+- **Preventing Layout Thrashing**: Because the observer runs after the script task, it avoids forced synchronous layouts (Layout Thrashing). The SDK waits for the browser to reach a "quiet" state before processing the new nodes.
+
+#### 🎛 Selective Processing Logic
+
+To keep the CPU overhead minimal:
+
+1. **Node Filtering**: We only react to `childList` mutations (ignoring attribute or character changes unless needed).
+2. **Type Checking**: We use `instanceof HTMLElement` to skip text nodes and comments immediately.
+3. **Scoped Querying**: Instead of re-scanning the whole document, we use `element.querySelectorAll` only on the specific `addedNodes` tree.
+
+---
+
+#### 💡 Key Discussion Points (Senior Interview Focus)
+
+- **MutationObserver vs. Legacy Events**: Legacy events caused massive performance degradation because they were synchronous. Modern SDKs must use MutationObserver to remain non-invasive.
+- **The "Observer" Pattern**: This architecture makes the SDK "Reactive"—it doesn't care _when_ or _how_ a button appears; it simply reacts when the browser confirms its existence.
+
 ## Questions to Confirm Later
 
 1. Why I see many sdks instead of simple stub function, it also appends the script tag? instead of needing user to manually append the script tag? Maybe to control when to load?

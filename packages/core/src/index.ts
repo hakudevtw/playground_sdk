@@ -1,3 +1,5 @@
+import { AutoTracker, ElementTracker } from "./tracker";
+
 type Command = [string, ...unknown[]];
 
 type Runner = (command: string, ...args: unknown[]) => void;
@@ -54,6 +56,11 @@ export const init = () => {
 	for (const args of queue) {
 		sdk(...args);
 	}
+
+	// 7. Start the AutoTracker
+	const elementTracker = new ElementTracker();
+	const autoTracker = new AutoTracker(elementTracker);
+	autoTracker.start();
 };
 
 init();

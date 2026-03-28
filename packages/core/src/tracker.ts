@@ -35,8 +35,8 @@ export class ElementTracker {
 	 * Retrieves the current tracking state for an element.
 	 * Returns a default state if the element hasn't been tracked yet.
 	 */
-	getMetadata(element: HTMLElement): TrackingMetadata {
-		return this.ensureMetadata(element);
+	getMetadata(element: HTMLElement): TrackingMetadata | undefined {
+		return this.metadataMap.get(element);
 	}
 
 	/**
@@ -63,5 +63,53 @@ export class ElementTracker {
 		const initial: TrackingMetadata = { clickCount: 0 };
 		this.metadataMap.set(element, initial);
 		return initial;
+	}
+}
+
+export class AutoTracker {
+	// https://developer.mozilla.org/en-US/docs/Web/API/MutationObserver
+	private readonly observer: MutationObserver;
+	private readonly elementTracker: ElementTracker;
+
+	constructor(elementTracker: ElementTracker) {
+		this.elementTracker = elementTracker;
+		this.observer = new MutationObserver((mutations) => {
+			for (const mutation of mutations) {
+				if (mutation.type === "childList") {
+					for (const node of mutation.addedNodes) {
+						if (node instanceof HTMLElement) {
+							this.searchAndTrack(node);
+						}
+					}
+				}
+			}
+		});
+	}
+
+	start() {
+		// Initial scan for elements already on the page
+		this.searchAndTrack(document.body);
+
+		this.observer.observe(document.body, {
+			childList: true,
+			subtree: true,
+		});
+
+		console.log("[SDK] AutoTracker started.");
+	}
+
+	stop() {
+		this.observer.disconnect();
+	}
+
+	private searchAndTrack(root: HTMLElement) {
+		if (root.hasAttribute("data-track")) {
+			this.elementTracker.track(root, { customId: root.id });
+		}
+
+		const targets = root.querySelectorAll<HTMLElement>("[data-track]");
+		for (const target of targets) {
+			this.elementTracker.track(target, { customId: target.id });
+		}
 	}
 }

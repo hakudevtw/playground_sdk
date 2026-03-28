@@ -24,5 +24,23 @@
 		</script>
 		<script defer src="dist/index.global.js"></script>
 	</head>
-	<body></body>
+	<body>
+		<button type="button" data-track id="add-button">Add Button</button>
+
+		<script>
+		"use strict";
+
+		const addButton = document.getElementById("add-button");
+
+		let counter = 0;
+		addButton.addEventListener("click", () => {
+			const newButton = document.createElement("button");
+			newButton.type = "button";
+			newButton.dataset.track = "true";
+			newButton.id = `new-button-${counter++}`;
+			newButton.textContent = `Click me ${counter}`;
+			document.body.appendChild(newButton);
+		});
+		</script>
+	</body>
 </html>
