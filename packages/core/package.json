@@ -3,7 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
-  "publishConfig": {
-    "access": "public"
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup "
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "*",
+    "esbuild-plugin-umd-wrapper": "^3.0.0",
+    "tsup": "^8.5.1"
   }
 }

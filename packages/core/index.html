@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Document</title>
+		<script>
+		"use strict";
+
+		// Stub: A tiny inline function in the HTML `<head>` that acts as a proxy.
+		((w, n) => {
+			w[n] =
+				w[n] ||
+				((...args) => {
+					if (!w[n].q) {
+						w[n].q = [];
+					}
+					w[n].q.push(args);
+				});
+		})(window, "MySDK");
+
+		// Try triggering the SDK before it's initialized
+		window.MySDK("track", "hello_from_html");
+		</script>
+		<script defer src="dist/index.global.js"></script>
+	</head>
+	<body></body>
+</html>
