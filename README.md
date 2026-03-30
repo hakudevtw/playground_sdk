@@ -4,7 +4,7 @@
 
 ### 📦 Part A: Bundling & Monorepo Strategy
 
-To ensure the SDK runs seamlessly across various customer environments (React, Next.js, legacy HTML), we use a **Bun Workspace** and `tsup` to generate three distinct formats:
+To ensure the SDK runs seamlessly across various customer environments (React, Next.js, legacy HTML), we use **Bun Workspaces** and `tsup` to generate three distinct formats:
 
 | Format  | Extension    | Target                             | Key Features                                                                                              |
 | :------ | :----------- | :--------------------------------- | :-------------------------------------------------------------------------------------------------------- |
@@ -14,15 +14,14 @@ To ensure the SDK runs seamlessly across various customer environments (React, N
 
 - **Zero Dependency Policy**: A core SDK rule. Every byte added to the SDK is a byte added to the customer's **LCP (Largest Contentful Paint)**.
 - **Protocol**: Using the `workspace:*` protocol allows `@repo/react` to consume `@repo/core` changes instantly without re-publishing.
-- Modern web development favors ESM over UMD primarily for its native browser support and static analysis, which enables Tree Shaking to significantly reduce bundle sizes and optimize performance.
 
 ### 🥷 Part B: Hijacking & Command Queue Logic
 
 We solve the race condition where a user calls the SDK before the script finishes downloading using a **Function-to-Function Hijacking** pattern.
 
 - **The Stub (Snippet)**: A tiny inline function in the HTML `<head>` that acts as a proxy, capturing all function calls into a `q` (queue) array.
-- **Overcoming UMD Collisions**: Bundlers often overwrite `window.MySDK`. We manually "rescue" the pre-existing instance inside `init()` before replacing the namespace with our live `Runner`.
-- **Atomic Replay**: We process backlogged events in a First-In-First-Out (FIFO) order and immediately clear the queue to prevent "Double Replay" bugs.
+- **The UMD Rescue**: Standard UMD bundlers often overwrite `window.MySDK` when they load. We manually "rescue" the pre-existing instance (and its `q` array) inside `init()` before replacing the namespace with our live `Runner`.
+- **Atomic Replay**: We process backlogged events in a First-In-First-Out (FIFO) order and immediately clear the queue **before** starting the loop to prevent "Double Replay" bugs.
 
 ### 🏷️ Part C: Type-Safe Lifecycle Management
 
@@ -35,114 +34,68 @@ Using TypeScript **Discriminated Unions** ensures internal stability and prevent
 
 ---
 
-### 💡 Key Discussion Points (Knowledge Base)
-
-- **Why UMD in 2026?**: Enterprise customers and Tag Managers (GTM) still expect a global variable. UMD is our "compatibility floor."
-- **Comparison to `dataLayer` (GA)**: While `dataLayer` is a passive array, our SDK uses a **Live Proxy**. The user calls `MySDK(...)` the same way regardless of whether the SDK is loaded or not (Superior DX).
-- **Namespace Citizenship**: By using an IIFE and manual hijacking, we avoid leaking internal build variables (like `MySDK_Internal`) into the customer's global scope.
-
-### 🔗 Reference Links & Resources
-
-- [tsup Documentation](https://tsup.egoist.dev/)
-- [Zenn: tsup UMD Build Tips](https://zenn.dev/monakamon/articles/tsup-umd-build-tips)
-- [esbuild-plugin-umd-wrapper](https://github.com/inqnuam/esbuild-plugin-umd-wrapper)
-
 ## Phase 2: Memory Management & DOM Tracking
-
-In this phase, we move from the "How to load" to the "How to watch." Specifically, we are going to build a tracker that observes elements on a page without causing the browser to lag or leak memory.
 
 ### Phase 2.1: Memory-Safe DOM Tracking (WeakMap)
 
-#### 🧠 The Memory Leak Problem in SDKs
-
-In massive ecosystems like Rakuten, users navigate through complex Single Page Applications (SPAs). DOM nodes are created and destroyed constantly. If an SDK stores metadata for these nodes in a standard Map or Object, the nodes will remain in memory even after being removed from the DOM, causing a Memory Leak. For a high-traffic site, this can eventually crash the user's browser tab.
-
-#### 🛠 The WeakMap Solution
-
-We implement the ElementTracker using a WeakMap<HTMLElement, TrackingMetadata>.
-
-Weak References: The WeakMap does not prevent the Garbage Collector (GC) from reclaiming an element. If the element is deleted from the DOM and no other code references it, the entry in the WeakMap is automatically removed.
-
-Lazy Initialization: By using a private ensureMetadata helper, we ensure the SDK handles "unseen" elements gracefully without redundant null-checks or pre-allocation.
-
-#### 💡 Discussion: Mutation by Reference
-
-Since WeakMap stores object references, we can retrieve the metadata object once and mutate its properties (e.g., metadata.clickCount++) directly. This is highly performant as it avoids repeated .set() calls and minimizes object allocation overhead—crucial for maintaining a 60fps user experience.
-
----
-
-#### 💡 Key Discussion Points (Rakuten Interview Focus)
-
-Standard Map vs. WeakMap: A standard Map holds "Strong" references. A WeakMap holds "Weak" references to its keys. In the context of DOM tracking, WeakMap is the industry standard for preventing memory leaks in 3rd-party scripts.
-
-Garbage Collection (GC): While we cannot manually trigger GC, we write "GC-friendly" code. In a large-scale SDK, "cleaning up after yourself" should be automatic, not manual.
+- **The Problem**: Storing metadata in a standard `Map` prevents Garbage Collection (GC) of deleted DOM nodes, leading to memory leaks in SPAs.
+- **The WeakMap Solution**: `WeakMap<HTMLElement, TrackingMetadata>` allows the GC to reclaim elements automatically when they are removed from the DOM.
+- **Mutation by Reference**: Since WeakMap stores object references, we retrieve the metadata object once and mutate its properties (e.g., `metadata.clickCount++`) directly. This is highly performant as it avoids repeated `.set()` calls and minimizes object allocation overhead.
 
 ### Phase 2.2: Automated Tracking & DOM Observation
 
-#### 🚀 The "Set and Forget" Integration
-
-At enterprise scale, requiring developers to manually tag every element in code is prone to human error and high maintenance. We implement an **AutoTracker** to decouple tracking logic from the application's business logic.
-
 - **Initial Scan**: Upon initialization, the SDK performs a one-time traversal of the existing DOM (`document.body`) to register all elements currently matching the `[data-track]` selector.
-- **Dynamic Observation**: We utilize `MutationObserver` to watch for `childList` changes. This allows the SDK to detect and track new elements injected by frameworks (React, Vue) or vanilla JS without requiring manual re-initialization.
+- **Dynamic Observation**: We utilize `MutationObserver` (asynchronous and microtask-based) to watch for `childList` changes.
+- **Performance**: The browser batches multiple DOM changes into a single callback, preventing "Jank" and Layout Thrashing.
 
-#### ⚡ Performance: Microtasks & Layout Stability
+### Phase 2.3: High-Scale Event Delegation (The Ears)
 
-A key requirement for a Rakuten-scale SDK is **Zero-Impact** on the host page's performance.
-
-- **Microtask Execution**: Unlike the deprecated `DOMNodeInserted` (which was synchronous and fired for every single node), `MutationObserver` is **asynchronous and microtask-based**.
-- **Batching**: The browser batches multiple DOM changes into a single callback that executes after the current execution task finishes. This prevents the "Jank" associated with frequent UI updates.
-- **Preventing Layout Thrashing**: Because the observer runs after the script task, it avoids forced synchronous layouts (Layout Thrashing). The SDK waits for the browser to reach a "quiet" state before processing the new nodes.
-
-#### 🎛 Selective Processing Logic
-
-To keep the CPU overhead minimal:
-
-1. **Node Filtering**: We only react to `childList` mutations (ignoring attribute or character changes unless needed).
-2. **Type Checking**: We use `instanceof HTMLElement` to skip text nodes and comments immediately.
-3. **Scoped Querying**: Instead of re-scanning the whole document, we use `element.querySelectorAll` only on the specific `addedNodes` tree.
+- **The "One Listener" Strategy**: Attaching 1,000 listeners is "Memory Suicide." We attach exactly **one** listener to the `window` object.
+- **The .closest() Pattern**: Traverses up the DOM tree from the click target to find the nearest tracked parent, capturing clicks on icons or text inside a button accurately.
+- **Passive & Capture**: We use `{ passive: true }` to ensure zero scroll lag and `{ capture: true }` to ensure we see the event even if other scripts call `stopPropagation()`.
 
 ---
 
-#### 💡 Key Discussion Points (Senior Interview Focus)
+## Phase 3: Reliability & Data Transport
 
-- **MutationObserver vs. Legacy Events**: Legacy events caused massive performance degradation because they were synchronous. Modern SDKs must use MutationObserver to remain non-invasive.
-- **The "Observer" Pattern**: This architecture makes the SDK "Reactive"—it doesn't care _when_ or _how_ a button appears; it simply reacts when the browser confirms its existence.
+### Phase 3.1: Centralized Transport & Batching
 
-### Phase 2.3: High-Scale Event Delegation
+- **Centralized Strategy**: We implement a **Centralized Transport** strategy by injecting a unique instance (DI) into all components, ensuring all events share a single buffer and flush timer.
+- **Batching**: We use a **5 events or 5 seconds** rule to balance server load versus data freshness.
 
-#### 👂 The "One Listener" Strategy
+### Phase 3.2: Reliability & The "Final Flush"
 
-In a massive ecosystem (2B+ events/day), adding an `addEventListener` to every single button is a "Memory Suicide." It consumes excessive heap space and slows down the main thread. We implement **Global Event Delegation**.
+- **navigator.sendBeacon()**: This API allows the browser to send data asynchronously in the background. It is guaranteed by the browser to finish even if the page is closed.
+- **Visibility API (Final Flush)**: We flush the buffer when `document.visibilityState === 'hidden'`. This is more reliable than `unload` and respects the **bfcache** (Back-Forward Cache).
 
-- **Single Entry Point**: We attach exactly **one** listener to the `window` object.
-- **The .closest() Pattern**: When a click occurs, we use the highly-optimized `element.closest('[data-track]')` method. This traverses up the DOM tree from the click target to find the nearest tracked parent, allowing us to capture clicks on icons or text inside a button accurately.
+### ⚡ Senior Refinement: Bypassing CORS Preflight
 
-#### ⚡ Performance Optimization for Rakuten Scale
-
-To ensure the SDK remains "Invisible" to the user experience:
-
-- **Passive Listeners**: We use `{ passive: true }` in our event listener. This tells the browser's compositor that we will not call `preventDefault()`, allowing the page to scroll and animate without waiting for our JavaScript logic to finish.
-- **Capture Phase**: By using `{ capture: true }`, our SDK sees the event first. This is crucial in complex apps where other scripts might call `stopPropagation()` and try to "hide" clicks from the analytics engine.
-
-#### 🧠 Decoupling: "Eyes" vs "Ears"
-
-We maintain a strict separation of concerns to handle complexity:
-
-1. **AutoTracker (The Eyes)**: Uses `MutationObserver` to find and register elements in our `WeakMap`.
-2. **EventDelegator (The Ears)**: Uses a single global listener to detect interactions.
-3. **ElementTracker (The Memory)**: The centralized `WeakMap` storage that connects the two, ensuring data integrity and automatic cleanup.
+- **The Challenge**: Sending `application/json` triggers an **OPTIONS (Preflight)** request. At 2B events/day, this doubles infrastructure costs.
+- **The Optimization**: By wrapping JSON in a `Blob` with `type: 'text/plain'`, the browser treats the beacon as a **"Simple Request."** This eliminates the Preflight overhead while the server still receives the valid JSON string.
 
 ---
 
-#### 💡 Key Discussion Points (Rakuten AMD Focus)
+## 🛠 Refactored Global Safety (The "Do No Harm" Rule)
 
-- **Scalability**: How do you handle a page with 10,000 buttons?
-  - _Answer_: "Through Event Delegation. We maintain O(1) event listeners regardless of the DOM size, ensuring constant memory overhead."
-- **Data Accuracy**: How do you handle clicks on a `<span>` inside a tracked `<button>`?
-  - _Answer_: "We use the `.closest()` traversal technique to ensure the event is attributed to the correct tracking entity, even if the click target is a nested child."
+In high-scale environments like Rakuten Ichiba, the SDK must be a guest that never breaks the host.
 
-## Questions to Confirm Later
+- **Global Try-Catch**: The entire `init()` function is wrapped in a try-catch block to ensure that an SDK failure never crashes the host site's critical business logic (like checkout).
+- **Namespace Hijacking Order**: We swap the global `window.MySDK` **before** starting observers, ensuring the system is ready to handle events the moment we start "watching."
 
-1. Why I see many sdks instead of simple stub function, it also appends the script tag? instead of needing user to manually append the script tag? Maybe to control when to load?
-2. Do we usually add data-track? Won't that also need user to add data-track to the elements? That don't seems auto...
+## FAQ (Developer Experience & Strategy)
+
+1. Why use a "Dynamic Loader" snippet instead of a manual `<script>` tag?
+
+Most professional SDKs use a small inline "Loader" that programmatically appends the `<script>` tag to the DOM.
+
+- **Asynchronous Execution**: It ensures the SDK is loaded with `async` or `defer`, preventing the tracking script from blocking the "Critical Rendering Path" of the host site.
+- **Resiliency**: If the script fails to load (e.g., ad-blockers or network issues), the "Stub" remains in memory, safely capturing events in a queue without crashing the application.
+- **Version Control**: It allows the SDK provider to dynamically inject versioning or environment-specific parameters (e.g., `sdk.js?v=2.0`) directly into the URL based on the user's configuration.
+
+2. If we use `data-track`, is the SDK actually "Auto"?
+
+In enterprise analytics, **"Auto-tracking"** refers to the **Decoupling of Tracking Logic**.
+
+- **The Decoupling**: Instead of a developer writing JavaScript (`MySDK('track', ...)`), they simply decorate HTML with attributes. The SDK's `MutationObserver` then **automatically** reacts to these changes.
+- **Noise Reduction**: At the scale of 2B+ events (Rakuten AMD scale), tracking "every single click" creates massive data noise and high CPU overhead.
+- **The Contract**: `data-track` acts as a clear contract between the Marketing/Product teams (who define what is important via HTML/CMS) and the Engineering team (who provide the infrastructure to capture it).

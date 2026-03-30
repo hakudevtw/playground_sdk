@@ -1,6 +1,11 @@
+import type { Transport } from "./transport";
+
 /**
- * Internal metadata structure for tracked DOM elements.
- * Using an interface allows for easy extension (e.g., adding scroll depth or hover duration).
+ * Metadata structure for tracked DOM elements.
+ * @interface TrackingMetadata
+ * @property {number} clickCount - Total interactions in the current session.
+ * @property {string} [customId] - ID of the element (usually the HTML id).
+ * @property {number} [lastClickedAt] - Unix timestamp of the last interaction.
  */
 interface TrackingMetadata {
 	clickCount: number;
@@ -9,11 +14,10 @@ interface TrackingMetadata {
 }
 
 /**
- * ElementTracker manages the association between DOM elements and tracking data.
- * 💡 Senior Design Choice: We use a WeakMap to prevent memory leaks.
- * Since the Map's keys are HTMLElements, using a standard Map would prevent
- * Garbage Collection (GC) of elements removed from the DOM. WeakMap allows
- * the GC to reclaim memory automatically when the element is destroyed.
+ * Manages element-level state using a memory-safe approach.
+ * 💡 Architecture: We use a WeakMap to ensure that when a React/Vue component
+ * is unmounted and removed from the DOM, the tracking data is automatically
+ * garbage collected, preventing memory leaks in long-running SPAs.
  */
 export class ElementTracker {
 	private readonly metadataMap: WeakMap<HTMLElement, TrackingMetadata>;
@@ -23,8 +27,9 @@ export class ElementTracker {
 	}
 
 	/**
-	 * Registers or updates an element for tracking.
-	 * Uses Object.assign to merge initialData without wiping out existing state.
+	 * Registers an element for tracking.
+	 * @param {HTMLElement} element - The target DOM node.
+	 * @param {Partial<TrackingMetadata>} initialData - Seed data for the tracker.
 	 */
 	track(element: HTMLElement, initialData: Partial<TrackingMetadata>) {
 		const metadata = this.ensureMetadata(element);
@@ -32,16 +37,15 @@ export class ElementTracker {
 	}
 
 	/**
-	 * Retrieves the current tracking state for an element.
-	 * Returns a default state if the element hasn't been tracked yet.
+	 * Retrieves metadata. Returns undefined if the element isn't being tracked.
 	 */
 	getMetadata(element: HTMLElement): TrackingMetadata | undefined {
 		return this.metadataMap.get(element);
 	}
 
 	/**
-	 * Specialized method to update click-related metrics.
-	 * Mutating the reference directly is safe and efficient within a WeakMap.
+	 * Increments the interaction count for a specific element.
+	 * Mutates the reference stored in the WeakMap directly for O(1) performance.
 	 */
 	incrementClick(element: HTMLElement) {
 		const metadata = this.ensureMetadata(element);
@@ -51,8 +55,8 @@ export class ElementTracker {
 
 	/**
 	 * 🛡️ Lazy Initialization Pattern:
-	 * Ensures that we always work with a valid object reference.
-	 * This reduces null-checks throughout the rest of the class.
+	 * Ensures we always have a valid object to work with without pre-allocating
+	 * memory for every element on the page.
 	 */
 	private ensureMetadata(element: HTMLElement): TrackingMetadata {
 		const existing = this.metadataMap.get(element);
@@ -66,8 +70,12 @@ export class ElementTracker {
 	}
 }
 
+/**
+ * Automates element discovery using MutationObserver.
+ * 💡 Scale Logic: Instead of re-scanning the whole DOM on every change,
+ * we only scan newly added nodes (addedNodes) to keep CPU overhead low.
+ */
 export class AutoTracker {
-	// https://developer.mozilla.org/en-US/docs/Web/API/MutationObserver
 	private readonly observer: MutationObserver;
 	private readonly elementTracker: ElementTracker;
 
@@ -77,6 +85,7 @@ export class AutoTracker {
 			for (const mutation of mutations) {
 				if (mutation.type === "childList") {
 					for (const node of mutation.addedNodes) {
+						// We only care about HTMLElements (skipping text/comment nodes)
 						if (node instanceof HTMLElement) {
 							this.searchAndTrack(node);
 						}
@@ -86,8 +95,10 @@ export class AutoTracker {
 		});
 	}
 
+	/**
+	 * Performs an initial scan and starts the real-time observer.
+	 */
 	start() {
-		// Initial scan for elements already on the page
 		this.searchAndTrack(document.body);
 
 		this.observer.observe(document.body, {
@@ -102,11 +113,16 @@ export class AutoTracker {
 		this.observer.disconnect();
 	}
 
+	/**
+	 * Recursively identifies elements with the [data-track] attribute.
+	 */
 	private searchAndTrack(root: HTMLElement) {
+		// Check if the root node of the mutation is the target
 		if (root.hasAttribute("data-track")) {
 			this.elementTracker.track(root, { customId: root.id });
 		}
 
+		// Query for all children matching our selector
 		const targets = root.querySelectorAll<HTMLElement>("[data-track]");
 		for (const target of targets) {
 			this.elementTracker.track(target, { customId: target.id });
@@ -114,19 +130,30 @@ export class AutoTracker {
 	}
 }
 
+/**
+ * Implements Global Event Delegation.
+ * 💡 Rakuten Scale: Attaching 1,000 listeners to 1,000 buttons is inefficient.
+ * We use a single 'Window' listener to handle all clicks via event bubbling.
+ */
 export class EventDelegator {
 	private readonly elementTracker: ElementTracker;
-	constructor(elementTracker: ElementTracker) {
+	private readonly transport: Transport;
+
+	constructor(elementTracker: ElementTracker, transport: Transport) {
 		this.elementTracker = elementTracker;
+		this.transport = transport;
 	}
 
 	start() {
-		// { passive: true }
-		// tells the browser we won't call event.preventDefault(),
-		// allowing the browser to optimize scrolling and UI performance.
+		/**
+		 * 💡 Senior Tip:
+		 * - 'capture: true' ensures we see the event even if another script
+		 * calls stopPropagation() later.
+		 * - 'passive: true' ensures we don't block the browser's UI thread.
+		 */
 		window.addEventListener("click", this.handleClick.bind(this), {
 			passive: true,
-			capture: true, // 💡 Global listeners often use capture to catch events first
+			capture: true,
 		});
 	}
 
@@ -136,15 +163,23 @@ export class EventDelegator {
 			return;
 		}
 
+		/**
+		 * 💡 Traversal: .closest() finds the nearest parent with tracking enabled.
+		 * This handles cases where a user clicks an icon or text inside a button.
+		 */
 		const trackedElement = target.closest<HTMLElement>("[data-track]");
-		if (trackedElement) {
-			// 1. Update our internal memory (WeakMap)
-			this.elementTracker.incrementClick(trackedElement);
 
+		if (trackedElement) {
+			this.elementTracker.incrementClick(trackedElement);
 			const metadata = this.elementTracker.getMetadata(trackedElement);
-			console.log(
-				`[SDK] Valid Click on #${trackedElement.id}. Total: ${metadata?.clickCount ?? 0}`
-			);
+
+			// Report to the buffered transport layer
+			this.transport.enqueue({
+				type: "click",
+				elementId: trackedElement.id,
+				timestamp: Date.now(),
+				payload: { clicks: metadata?.clickCount ?? 0 },
+			});
 		}
 	}
 }
