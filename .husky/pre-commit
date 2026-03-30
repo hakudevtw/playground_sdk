@@ -13,8 +13,16 @@ if [ -z "$STAGED_FILES" ]; then
 fi
 
 # Run formatter
-bun x ultracite fix
+set +e
+ULTRACITE_BIN="./node_modules/.bin/ultracite"
+if [ -x "$ULTRACITE_BIN" ]; then
+  "$ULTRACITE_BIN" fix
+else
+  # Fallback in case dependencies weren't installed with a node-compatible install
+  npx ultracite fix
+fi
 FORMAT_EXIT_CODE=$?
+set -e
 
 # Re-stage files that were already staged
 echo "$STAGED_FILES" | while IFS= read -r file; do

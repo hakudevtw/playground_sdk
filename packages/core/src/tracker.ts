@@ -113,3 +113,38 @@ export class AutoTracker {
 		}
 	}
 }
+
+export class EventDelegator {
+	private readonly elementTracker: ElementTracker;
+	constructor(elementTracker: ElementTracker) {
+		this.elementTracker = elementTracker;
+	}
+
+	start() {
+		// { passive: true }
+		// tells the browser we won't call event.preventDefault(),
+		// allowing the browser to optimize scrolling and UI performance.
+		window.addEventListener("click", this.handleClick.bind(this), {
+			passive: true,
+			capture: true, // 💡 Global listeners often use capture to catch events first
+		});
+	}
+
+	private handleClick(event: MouseEvent) {
+		const target = event.target as HTMLElement;
+		if (!target) {
+			return;
+		}
+
+		const trackedElement = target.closest<HTMLElement>("[data-track]");
+		if (trackedElement) {
+			// 1. Update our internal memory (WeakMap)
+			this.elementTracker.incrementClick(trackedElement);
+
+			const metadata = this.elementTracker.getMetadata(trackedElement);
+			console.log(
+				`[SDK] Valid Click on #${trackedElement.id}. Total: ${metadata?.clickCount ?? 0}`
+			);
+		}
+	}
+}

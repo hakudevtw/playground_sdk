@@ -14,6 +14,7 @@ To ensure the SDK runs seamlessly across various customer environments (React, N
 
 - **Zero Dependency Policy**: A core SDK rule. Every byte added to the SDK is a byte added to the customer's **LCP (Largest Contentful Paint)**.
 - **Protocol**: Using the `workspace:*` protocol allows `@repo/react` to consume `@repo/core` changes instantly without re-publishing.
+- Modern web development favors ESM over UMD primarily for its native browser support and static analysis, which enables Tree Shaking to significantly reduce bundle sizes and optimize performance.
 
 ### 🥷 Part B: Hijacking & Command Queue Logic
 
@@ -107,6 +108,39 @@ To keep the CPU overhead minimal:
 
 - **MutationObserver vs. Legacy Events**: Legacy events caused massive performance degradation because they were synchronous. Modern SDKs must use MutationObserver to remain non-invasive.
 - **The "Observer" Pattern**: This architecture makes the SDK "Reactive"—it doesn't care _when_ or _how_ a button appears; it simply reacts when the browser confirms its existence.
+
+### Phase 2.3: High-Scale Event Delegation
+
+#### 👂 The "One Listener" Strategy
+
+In a massive ecosystem (2B+ events/day), adding an `addEventListener` to every single button is a "Memory Suicide." It consumes excessive heap space and slows down the main thread. We implement **Global Event Delegation**.
+
+- **Single Entry Point**: We attach exactly **one** listener to the `window` object.
+- **The .closest() Pattern**: When a click occurs, we use the highly-optimized `element.closest('[data-track]')` method. This traverses up the DOM tree from the click target to find the nearest tracked parent, allowing us to capture clicks on icons or text inside a button accurately.
+
+#### ⚡ Performance Optimization for Rakuten Scale
+
+To ensure the SDK remains "Invisible" to the user experience:
+
+- **Passive Listeners**: We use `{ passive: true }` in our event listener. This tells the browser's compositor that we will not call `preventDefault()`, allowing the page to scroll and animate without waiting for our JavaScript logic to finish.
+- **Capture Phase**: By using `{ capture: true }`, our SDK sees the event first. This is crucial in complex apps where other scripts might call `stopPropagation()` and try to "hide" clicks from the analytics engine.
+
+#### 🧠 Decoupling: "Eyes" vs "Ears"
+
+We maintain a strict separation of concerns to handle complexity:
+
+1. **AutoTracker (The Eyes)**: Uses `MutationObserver` to find and register elements in our `WeakMap`.
+2. **EventDelegator (The Ears)**: Uses a single global listener to detect interactions.
+3. **ElementTracker (The Memory)**: The centralized `WeakMap` storage that connects the two, ensuring data integrity and automatic cleanup.
+
+---
+
+#### 💡 Key Discussion Points (Rakuten AMD Focus)
+
+- **Scalability**: How do you handle a page with 10,000 buttons?
+  - _Answer_: "Through Event Delegation. We maintain O(1) event listeners regardless of the DOM size, ensuring constant memory overhead."
+- **Data Accuracy**: How do you handle clicks on a `<span>` inside a tracked `<button>`?
+  - _Answer_: "We use the `.closest()` traversal technique to ensure the event is attributed to the correct tracking entity, even if the click target is a nested child."
 
 ## Questions to Confirm Later
 

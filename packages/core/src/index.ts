@@ -1,4 +1,4 @@
-import { AutoTracker, ElementTracker } from "./tracker";
+import { AutoTracker, ElementTracker, EventDelegator } from "./tracker";
 
 type Command = [string, ...unknown[]];
 
@@ -59,8 +59,14 @@ export const init = () => {
 
 	// 7. Start the AutoTracker
 	const elementTracker = new ElementTracker();
+
+	// The "Eyes" (Finding elements)
 	const autoTracker = new AutoTracker(elementTracker);
 	autoTracker.start();
+
+	// The "Ears" (Listening for clicks)
+	const eventDelegator = new EventDelegator(elementTracker);
+	eventDelegator.start();
 };
 
 init();

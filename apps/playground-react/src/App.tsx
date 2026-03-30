@@ -37,6 +37,7 @@ function App() {
 				</div>
 				<button
 					className="counter"
+					data-track
 					onClick={() => setCount((count) => count + 1)}
 					type="button"
 				>
