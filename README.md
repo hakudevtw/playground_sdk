@@ -75,12 +75,59 @@ Using TypeScript **Discriminated Unions** ensures internal stability and prevent
 
 ---
 
-## 🛠 Refactored Global Safety (The "Do No Harm" Rule)
+### 🛠 Refactored Global Safety (The "Do No Harm" Rule)
 
 In high-scale environments like Rakuten Ichiba, the SDK must be a guest that never breaks the host.
 
 - **Global Try-Catch**: The entire `init()` function is wrapped in a try-catch block to ensure that an SDK failure never crashes the host site's critical business logic (like checkout).
 - **Namespace Hijacking Order**: We swap the global `window.MySDK` **before** starting observers, ensuring the system is ready to handle events the moment we start "watching."
+
+# Phase 4: Hardening & Enterprise Testing (Vitest)
+
+In this phase, we moved from **Building** to **Hardening**. At Rakuten scale, we cannot manually verify data flow; we need automated proofs that our logic holds up under network stress and time-sensitive triggers.
+
+## Part A: Environmental Simulation (JSDOM vs. Reality)
+
+We discovered that testing an SDK in a terminal (Node/Bun) creates a "Simulation Gap."
+
+- **The Problem**: Node.js does not have a `document`, `window`, or `navigator`.
+- **The Solution**: We integrated **JSDOM** to simulate the browser environment. However, we learned that JSDOM only simulates the **DOM**, not the **Network**. We had to manually mock `navigator.sendBeacon` using `vi.fn()` to track outgoing calls.
+
+## Part B: Deterministic "Time Travel" Testing
+
+Testing a 5-second batching rule shouldn't take 5 seconds of real time.
+
+- **Fake Timers**: Using `vi.useFakeTimers()`, we "froze" the global clock.
+- **Clock Manipulation**: We used `vi.advanceTimersByTime(5000)` to fast-forward the SDK's internal `setTimeout` logic.
+- **Sequential Integrity**: We used `vi.setSystemTime()` to prove that the SDK captures unique, sequential timestamps even when events happen milliseconds apart.
+
+## Part C: Data Integrity & Payload Verification
+
+An SDK is essentially a "Data Translator." If the translation is wrong, the backend receives garbage.
+
+- **Blob Cracking**: Since `sendBeacon` transmits a `Blob`, we used `await blob.text()` inside our tests to "crack open" the payload.
+- **Deep Assertion**: We verified not just that a request was sent, but that the internal JSON structure matched our batching contract (an Array of Objects).
+
+## Part D: Simulation (JSDOM) vs. Browser Testing
+
+We analyzed when to use "Fake" browsers versus "Real" ones for SDK verification.
+
+| Feature       | Simulation (JSDOM)                        | Browser Testing (@vitest/browser)       |
+| :------------ | :---------------------------------------- | :-------------------------------------- |
+| **Execution** | Runs in Node.js (Terminal)                | Runs in a real Chrome/Safari instance   |
+| **Speed**     | Ultra-Fast (ms)                           | Slower (seconds to launch)              |
+| **Accuracy**  | ~80% (Missing complex Web APIs)           | 100% (Real browser behavior)            |
+| **Mocks**     | Heavily used (e.g., Mocking `sendBeacon`) | Less needed (uses real APIs)            |
+| **Best For**  | Testing internal **Logic**                | Testing **Cross-browser Compatibility** |
+
+---
+
+## 💡 Key Discussion Points (Senior Interview Focus)
+
+- **Why Mock instead of Real Testing?**: "Speed and Determinism. Mocks allow us to test the **SDK Logic** (e.g., 'Does it batch 5 items?') without the 'flakiness' of real network latency or the cost of hitting production servers."
+- **Unit Testing vs. Browser Testing**: "Unit tests (JSDOM) are for rapid logic verification (O(seconds)). Browser tests (@vitest/browser) are for cross-browser compatibility (O(minutes)). For a core data pipeline, both are required."
+- **Cleanup (Idempotency)**: "Always use `afterEach` to reset `vi.useRealTimers()`. If you don't 'clean up' the fake clock, it will leak into other tests, causing mysterious failures."
+- **The "Final Flush" Test**: To simulate a user closing a tab, we learned to manually dispatch a `visibilitychange` event and use `Object.defineProperty` to toggle the `document.visibilityState` to 'hidden'.
 
 ## FAQ (Developer Experience & Strategy)
 

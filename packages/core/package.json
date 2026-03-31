@@ -6,12 +6,15 @@
   "scripts": {
     "dev": "tsup --watch & serve dist -l 4010",
     "build": "tsup",
-    "start": "serve dist -l 4010"
+    "start": "serve dist -l 4010",
+    "test": "vitest"
   },
   "devDependencies": {
     "@repo/typescript-config": "*",
     "esbuild-plugin-umd-wrapper": "^3.0.0",
+    "jsdom": "^29.0.1",
     "serve": "^14.2.4",
-    "tsup": "^8.5.1"
+    "tsup": "^8.5.1",
+    "vitest": "^4.1.2"
   }
 }

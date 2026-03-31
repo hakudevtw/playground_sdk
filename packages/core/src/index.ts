@@ -25,7 +25,7 @@ declare global {
 
 const SDK_NAME = "MySDK";
 const PROD_ENDPOINT =
-	"	https://webhook.site/cb436ffe-76c5-4b97-a287-f9cefc41bcc3";
+	"https://webhook.site/cb436ffe-76c5-4b97-a287-f9cefc41bcc3";
 
 /**
  * Core Initialization Function
